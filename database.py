@@ -960,6 +960,102 @@ def search_work_items(project_id: str, query: str) -> List[Dict[str, Any]]:
         return items
 
 
+def _build_breadcrumb_path(item: Dict[str, Any], all_items_by_id: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Build a breadcrumb path from root to the given item.
+    
+    Args:
+        item: The target item to build path for
+        all_items_by_id: Dictionary of all items indexed by id for quick lookup
+        
+    Returns:
+        List of parent items in order from root to immediate parent
+        (does not include the target item itself)
+    """
+    breadcrumb = []
+    current_item = item
+    max_depth = 10  # Prevent infinite loops
+    depth = 0
+    
+    # Walk up the parent chain
+    while current_item.get('parent_id') is not None and depth < max_depth:
+        parent_id = current_item['parent_id']
+        parent_item = all_items_by_id.get(parent_id)
+        
+        if parent_item is None:
+            # Orphaned item - parent doesn't exist
+            break
+            
+        breadcrumb.insert(0, parent_item)  # Insert at beginning to maintain order
+        current_item = parent_item
+        depth += 1
+    
+    return breadcrumb
+
+
+def search_work_items_with_context(project_id: str, query: str) -> List[Dict[str, Any]]:
+    """
+    Search for work items within a project with parent context information.
+    
+    Enhanced version of search_work_items that includes breadcrumb paths
+    showing the hierarchy context for each search result.
+    
+    Args:
+        project_id: Project identifier to search within
+        query: Search query string to match against title and description
+        
+    Returns:
+        List of matching work items with added 'breadcrumb_path' and 'parent_context' fields
+        
+    Raises:
+        ValueError: If query is empty or invalid
+    """
+    if not query or not query.strip():
+        raise ValueError("Search query cannot be empty")
+    
+    # Get all items in the project for building breadcrumbs
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT * FROM work_items WHERE project_id = ? ORDER BY id",
+            [project_id]
+        )
+        all_items = [dict(row) for row in cursor.fetchall()]
+    
+    # Create lookup dictionary for fast parent resolution
+    all_items_by_id = {item['id']: item for item in all_items}
+    
+    # Get search results using the existing search function
+    search_results = search_work_items(project_id, query)
+    
+    # Enhance each result with parent context
+    enhanced_results = []
+    for item in search_results:
+        # Build breadcrumb path
+        breadcrumb_path = _build_breadcrumb_path(item, all_items_by_id)
+        
+        # Create parent context string
+        if breadcrumb_path:
+            context_parts = [f"{parent['type']}: {parent['title']}" for parent in breadcrumb_path]
+            parent_context = " → ".join(context_parts)
+        else:
+            # Top-level item or orphaned item
+            if item['parent_id'] is None:
+                parent_context = "(top-level)"
+            else:
+                parent_context = f"(orphaned - parent {item['parent_id']} not found)"
+        
+        # Add context information to the item
+        enhanced_item = dict(item)  # Create copy
+        enhanced_item['breadcrumb_path'] = breadcrumb_path
+        enhanced_item['parent_context'] = parent_context
+        
+        enhanced_results.append(enhanced_item)
+    
+    logger.info(f"Enhanced search for '{query}' in project {project_id}: found {len(enhanced_results)} items with context")
+    
+    return enhanced_results
+
+
 def get_changelog_for_project(project_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get changelog entries for a project.
