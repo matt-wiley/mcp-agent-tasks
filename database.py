@@ -29,6 +29,51 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
+def check_database_health() -> Dict[str, Any]:
+    """
+    Perform a health check on the database.
+    
+    Returns:
+        Dict[str, Any]: Health check results with status and details
+    """
+    try:
+        with get_connection() as conn:
+            # Test basic connectivity
+            cursor = conn.cursor()
+            
+            # Check if tables exist
+            cursor.execute("""
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name IN ('work_items', 'changelog')
+            """)
+            tables = [row[0] for row in cursor.fetchall()]
+            
+            # Test a simple query
+            cursor.execute("SELECT COUNT(*) FROM work_items")
+            work_item_count = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM changelog")
+            changelog_count = cursor.fetchone()[0]
+            
+            return {
+                "status": "healthy",
+                "database_path": DATABASE_PATH,
+                "tables_present": tables,
+                "work_items_count": work_item_count,
+                "changelog_count": changelog_count,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"Database health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "database_path": DATABASE_PATH,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+
 def init_database() -> None:
     """
     Initialize the database with required tables and indexes.

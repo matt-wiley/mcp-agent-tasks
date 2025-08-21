@@ -9,6 +9,9 @@ capabilities while achieving massive token savings through a "rolling work plan"
 import logging
 import asyncio
 import json
+import argparse
+import signal
+import sys
 from typing import Any, Dict, List
 
 # MCP server imports
@@ -17,7 +20,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # Import our database and tools modules
-from database import init_database
+from database import init_database, check_database_health
 from tools import (
     get_project_id,
     get_current_work_plan,
@@ -27,15 +30,27 @@ from tools import (
     search_items
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging based on command line arguments
+def setup_logging(debug: bool = False) -> None:
+    """Set up logging configuration."""
+    level = logging.DEBUG if debug else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
 logger = logging.getLogger(__name__)
 
 # Initialize MCP server
 server = Server("mcp-agent-tasks")
+
+# Global flag for graceful shutdown
+shutdown_event = asyncio.Event()
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully."""
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    shutdown_event.set()
 
 @server.list_tools()
 async def list_tools() -> List[Tool]:
@@ -203,30 +218,98 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 async def main():
     """Main server entry point."""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="MCP Task Management Server")
+    parser.add_argument(
+        "--debug", 
+        action="store_true", 
+        help="Enable debug logging"
+    )
+    parser.add_argument(
+        "--health-check", 
+        action="store_true", 
+        help="Run database health check and exit"
+    )
+    args = parser.parse_args()
+    
+    # Set up logging
+    setup_logging(args.debug)
+    
+    # Handle health check mode
+    if args.health_check:
+        logger.info("Running database health check...")
+        health_result = check_database_health()
+        print(json.dumps(health_result, indent=2))
+        sys.exit(0 if health_result["status"] == "healthy" else 1)
+    
+    # Set up signal handlers for graceful shutdown
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     logger.info("Starting MCP Task Management Server...")
+    logger.info(f"Debug logging: {'enabled' if args.debug else 'disabled'}")
     
     # Initialize database on startup
     try:
         init_database()
         logger.info("Database initialized successfully")
+        
+        # Run initial health check
+        health_result = check_database_health()
+        if health_result["status"] != "healthy":
+            logger.error(f"Database health check failed: {health_result}")
+            sys.exit(1)
+        else:
+            logger.info(f"Database health check passed: {health_result['work_items_count']} work items, {health_result['changelog_count']} changelog entries")
+            
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
-        raise
+        sys.exit(1)
     
     # Start the server
     try:
         logger.info("Server ready and listening for connections...")
+        logger.info("Use Ctrl+C or SIGTERM to shutdown gracefully")
+        
         async with stdio_server() as (read_stream, write_stream):
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options()
+            # Create a task for the server
+            server_task = asyncio.create_task(
+                server.run(
+                    read_stream,
+                    write_stream,
+                    server.create_initialization_options()
+                )
             )
+            
+            # Wait for either the server to complete or shutdown signal
+            done, pending = await asyncio.wait(
+                [server_task, asyncio.create_task(shutdown_event.wait())],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Cancel any pending tasks
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+            # Check if server completed with an error
+            if server_task in done:
+                try:
+                    await server_task
+                except Exception as e:
+                    logger.error(f"Server error: {e}")
+                    raise
+                    
+    except KeyboardInterrupt:
+        logger.info("Received keyboard interrupt")
     except Exception as e:
         logger.error(f"Server error: {e}")
-        raise
+        sys.exit(1)
     finally:
-        logger.info("Server shutting down...")
+        logger.info("Server shutdown complete")
 
 if __name__ == "__main__":
     asyncio.run(main())
