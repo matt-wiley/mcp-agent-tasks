@@ -343,6 +343,64 @@ def add_completion_summaries(hierarchy: Dict[str, Any], all_items: List[Dict[str
     return hierarchy
 
 
+def create_work_item(project_id: str, item_type: str, title: str, description: str = None, parent_id: Optional[int] = None, notes: str = None) -> Dict[str, Any]:
+    """
+    Create a new work item in the database.
+    
+    Args:
+        project_id: Project identifier
+        item_type: Type of item (project, phase, task, subtask)
+        title: Title of the work item
+        description: Optional description
+        parent_id: Optional parent item ID for hierarchy
+        notes: Optional notes
+    
+    Returns:
+        Dict containing the created work item with generated ID
+    """
+    with get_connection() as conn:
+        # Auto-generate order_index: get max sibling order + 10
+        if parent_id is None:
+            # Top-level item, get max order for items with no parent in this project
+            cursor = conn.execute(
+                "SELECT COALESCE(MAX(order_index), 0) FROM work_items WHERE project_id = ? AND parent_id IS NULL",
+                [project_id]
+            )
+        else:
+            # Child item, get max order for siblings with same parent
+            cursor = conn.execute(
+                "SELECT COALESCE(MAX(order_index), 0) FROM work_items WHERE project_id = ? AND parent_id = ?",
+                [project_id, parent_id]
+            )
+        
+        max_order = cursor.fetchone()[0]
+        new_order = max_order + 10
+        
+        # Insert the new work item
+        cursor = conn.execute('''
+            INSERT INTO work_items (
+                project_id, type, title, description, parent_id, notes, order_index,
+                status, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'not_started', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ''', [project_id, item_type, title, description, parent_id, notes, new_order])
+        
+        new_id = cursor.lastrowid
+        
+        # Fetch the created item to return complete data
+        cursor = conn.execute('''
+            SELECT id, project_id, type, title, description, status, parent_id,
+                   notes, order_index, created_at, updated_at
+            FROM work_items WHERE id = ?
+        ''', [new_id])
+        
+        created_item = dict(cursor.fetchone())
+        
+        conn.commit()
+        logger.info(f"Created work item {new_id}: {item_type} '{title}' in project {project_id}")
+        
+        return created_item
+
+
 if __name__ == "__main__":
     # Test database initialization and queries when run directly
     logging.basicConfig(level=logging.INFO)
@@ -406,5 +464,52 @@ if __name__ == "__main__":
         for task in project['direct_tasks']:
             summary = task.get('completion_summary', 'No completion summary')
             print(f"Direct Task '{task['title']}': {summary}")
+    
+    # Test create_work_item function
+    print("\nTesting create_work_item:")
+    try:
+        # Create a test project
+        new_project = create_work_item(
+            project_id=test_project_id,
+            item_type="project", 
+            title="Test Project Created",
+            description="A test project created by create_work_item"
+        )
+        print(f"Created project: {new_project['id']} - {new_project['title']}")
+        
+        # Create a phase under the project
+        new_phase = create_work_item(
+            project_id=test_project_id,
+            item_type="phase",
+            title="Test Phase",
+            description="A test phase",
+            parent_id=new_project['id']
+        )
+        print(f"Created phase: {new_phase['id']} - {new_phase['title']} (parent: {new_phase['parent_id']})")
+        
+        # Create a task under the phase
+        new_task = create_work_item(
+            project_id=test_project_id,
+            item_type="task", 
+            title="Test Task",
+            parent_id=new_phase['id']
+        )
+        print(f"Created task: {new_task['id']} - {new_task['title']} (order: {new_task['order_index']})")
+        
+        # Create another task to test order_index increment
+        new_task2 = create_work_item(
+            project_id=test_project_id,
+            item_type="task",
+            title="Test Task 2", 
+            parent_id=new_phase['id']
+        )
+        print(f"Created task 2: {new_task2['id']} - {new_task2['title']} (order: {new_task2['order_index']})")
+        
+        # Verify data persistence
+        all_items_after = get_all_work_items_for_project(test_project_id)
+        print(f"Total items after creation: {len(all_items_after)}")
+        
+    except Exception as e:
+        print(f"Error testing create_work_item: {e}")
     
     print("\nDatabase functions working correctly!")
