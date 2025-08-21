@@ -210,16 +210,16 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 **Goal:** Specialized tool for marking items as completed
 
 #### Subtask 2.5.1: Completion logic
-- [ ] Update item status to 'completed'
-- [ ] Set updated_at timestamp
-- [ ] Validate item exists and belongs to project
-- [ ] Return confirmation with completion timestamp
+- [x] Update item status to 'completed'
+- [x] Set updated_at timestamp
+- [x] Validate item exists and belongs to project
+- [x] Return confirmation with completion timestamp
 
 #### Subtask 2.5.2: Completion changelog
-- [ ] Log completion action to changelog
-- [ ] Include completion timestamp in details
-- [ ] Add project_id for proper scoping
-- [ ] Handle logging errors
+- [x] Log completion action to changelog
+- [x] Include completion timestamp in details
+- [x] Add project_id for proper scoping
+- [x] Handle logging errors
 
 #### Subtask 2.5.3: MCP tool integration
 - [ ] Register complete_item tool with server

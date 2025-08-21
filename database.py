@@ -848,6 +848,66 @@ def log_to_changelog(work_item_id: int, project_id: str, action: str, details: s
         logger.error(f"Failed to log to changelog: {e}")
 
 
+def complete_item(item_id: int, project_id: str) -> Dict[str, Any]:
+    """
+    Mark a work item as completed with timestamp.
+    
+    This is a specialized function for completing items that provides
+    a cleaner interface than using the generic update function.
+    
+    Args:
+        item_id: ID of the work item to complete
+        project_id: Project identifier for validation
+        
+    Returns:
+        Dictionary containing the completed work item with completion timestamp
+        
+    Raises:
+        ValueError: If item doesn't exist or belongs to wrong project
+    """
+    with get_connection() as conn:
+        # First, verify the item exists and belongs to the project
+        cursor = conn.execute(
+            "SELECT * FROM work_items WHERE id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        existing_item_row = cursor.fetchone()
+        
+        if not existing_item_row:
+            raise ValueError(f"Work item {item_id} not found in project {project_id}")
+        
+        existing_item = dict(existing_item_row)
+        
+        # Check if already completed
+        if existing_item['status'] == 'completed':
+            logger.info(f"Work item {item_id} is already completed")
+            return existing_item
+        
+        # Update status to completed and set updated_at timestamp
+        completion_time = datetime.now()
+        conn.execute('''
+            UPDATE work_items 
+            SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND project_id = ?
+        ''', [item_id, project_id])
+        
+        # Get the updated item with completion timestamp
+        cursor = conn.execute(
+            "SELECT * FROM work_items WHERE id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        completed_item = dict(cursor.fetchone())
+        
+        conn.commit()
+        logger.info(f"Completed work item {item_id} in project {project_id}: {completed_item['title']}")
+        
+        # Log completion to changelog
+        details = f"Item completed: {completed_item['title']}"
+        log_to_changelog(item_id, project_id, "completed", details)
+        
+        return completed_item
+
+
 def get_changelog_for_project(project_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get changelog entries for a project.
