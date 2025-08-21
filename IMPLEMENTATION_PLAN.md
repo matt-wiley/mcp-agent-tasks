@@ -2,7 +2,17 @@
 
 **Project:** MCP Agent Tasks  
 **Repository:** https://github.com/matt-wiley/mcp-agent-tasks  
-**Goal:** Build a minimal MCP server for AI agents to manage tasks without burning context tokens
+**Goal:** Build a minimal MCP server fo#### Subtask 2.4.3: Changelog for updates
+- [x] Log each field change to changelog
+- [x] Include old and new values in details
+- [x] Track which fields were modified
+- [x] Handle multiple field updates in single operation
+
+#### Subtask 2.4.4: MCP tool integration
+- [x] Register update_work_item tool
+- [x] Define schema with id parameter and flexible field updates
+- [x] Add proper error handling for invalid IDs
+- [x] Format response with updated item to manage tasks without burning context tokens
 
 ## Ways of Working
 
@@ -191,10 +201,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [ ] Handle multiple field updates in single operation
 
 #### Subtask 2.4.4: MCP tool integration
-- [ ] Register update_work_item tool
-- [ ] Define schema with id parameter and flexible field updates
-- [ ] Add proper error handling for invalid IDs
-- [ ] Format response with updated item
+- [x] Register update_work_item tool
+- [x] Define schema with id parameter and flexible field updates
+- [x] Add proper error handling for invalid IDs
+- [x] Format response with updated item
 
 ### Task 2.5: Item Completion Tool
 **Goal:** Specialized tool for marking items as completed

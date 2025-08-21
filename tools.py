@@ -14,7 +14,8 @@ from database import (
     get_all_work_items_for_project,
     build_hierarchy,
     add_completion_summaries,
-    create_work_item as _create_work_item
+    create_work_item as _create_work_item,
+    update_work_item as _update_work_item
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,75 @@ async def create_work_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Failed to create work item: {str(e)}")
 
 
+async def update_work_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    MCP tool: Update an existing work item with flexible field updates
+    
+    Args:
+        arguments: Dictionary containing:
+            - id (int): ID of the work item to update
+            - project_id (str): Project identifier for validation
+            - title (str, optional): New title for the work item
+            - description (str, optional): New description
+            - status (str, optional): New status (not_started, in_progress, completed)
+            - type (str, optional): New type (project, phase, task, subtask)
+            - parent_id (int, optional): New parent ID for hierarchy
+            - order_index (float, optional): New order index for positioning
+    
+    Returns:
+        Dict containing the updated work item data
+    
+    Raises:
+        ValueError: If required fields are missing or validation fails
+    """
+    try:
+        # Extract and validate required parameters
+        item_id = arguments.get("id")
+        if item_id is None:  # Allow id=0
+            raise ValueError("id parameter is required")
+        
+        project_id = arguments.get("project_id")
+        if not project_id:
+            raise ValueError("project_id parameter is required")
+        
+        # Extract optional update parameters
+        updates = {}
+        for field in ['title', 'description', 'status', 'type', 'parent_id', 'order_index']:
+            if field in arguments:
+                updates[field] = arguments[field]
+        
+        if not updates:
+            raise ValueError("At least one field must be provided for update")
+        
+        # Update the work item (includes validation and changelog logging)
+        updated_item = _update_work_item(item_id, project_id, **updates)
+        
+        logger.info(f"Updated work item via MCP: {updated_item['id']} - updated fields: {list(updates.keys())}")
+        
+        # Format response according to MCP specification
+        return {
+            "content": [
+                {
+                    "type": "text", 
+                    "text": f"Work item updated successfully!\n\n"
+                           f"ID: {updated_item['id']}\n"
+                           f"Type: {updated_item['type']}\n"
+                           f"Title: {updated_item['title']}\n"
+                           f"Status: {updated_item['status']}\n"
+                           f"Project: {updated_item['project_id']}"
+                           + (f"\nParent ID: {updated_item['parent_id']}" if updated_item['parent_id'] else "")
+                           + (f"\nDescription: {updated_item['description']}" if updated_item['description'] else "")
+                           + f"\n\nUpdated fields: {', '.join(updates.keys())}"
+                }
+            ],
+            "data": updated_item
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in update_work_item tool: {e}")
+        raise ValueError(f"Failed to update work item: {str(e)}")
+
+
 # Tool definitions for MCP server registration
 TOOLS = [
     Tool(
@@ -250,6 +320,50 @@ TOOLS = [
             },
             "required": ["project_id", "type", "title"]
         }
+    ),
+    Tool(
+        name="update_work_item",
+        description="Update an existing work item with flexible field modifications",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "ID of the work item to update"
+                },
+                "project_id": {
+                    "type": "string", 
+                    "description": "Project identifier from get_project_id tool"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "New title for the work item"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "New description for the work item"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["not_started", "in_progress", "completed"],
+                    "description": "New status for the work item"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["project", "phase", "task", "subtask"],
+                    "description": "New type for the work item"
+                },
+                "parent_id": {
+                    "type": "integer",
+                    "description": "New parent item ID for hierarchy changes"
+                },
+                "order_index": {
+                    "type": "number",
+                    "description": "New order index for positioning"
+                }
+            },
+            "required": ["id", "project_id"]
+        }
     )
 ]
 
@@ -258,7 +372,8 @@ TOOLS = [
 TOOL_HANDLERS = {
     "get_project_id": get_project_id,
     "get_current_work_plan": get_current_work_plan,
-    "create_work_item": create_work_item
+    "create_work_item": create_work_item,
+    "update_work_item": update_work_item
 }
 
 
