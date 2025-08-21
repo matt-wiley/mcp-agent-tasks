@@ -25,10 +25,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Add basic project structure for MCP server
 
 #### Subtask 1.1.2: Add MCP dependencies with UV
-- [ ] Research and add MCP Python library dependency with `uv add`
-- [ ] Add any additional dependencies needed for MCP server
-- [ ] Document that SQLite3 is built-in (no dependency needed)
-- [ ] Update .gitignore to exclude `tasks.db`, `.venv/`, `__pycache__`, etc.
+- [x] Research and add MCP Python library dependency with `uv add`
+- [x] Add any additional dependencies needed for MCP server
+- [x] Document that SQLite3 is built-in (no dependency needed)
+- [x] Update .gitignore to exclude `tasks.db`, `.venv/`, `__pycache__`, etc.
 
 ### Task 1.2: Database Schema Implementation
 **Goal:** Create the SQLite database structure for task management
