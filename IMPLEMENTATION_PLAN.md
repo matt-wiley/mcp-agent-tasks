@@ -32,6 +32,19 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 2. Massive token savings vs current work plans
 3. Rolling work plan concept works (completed items auto-hide)
 
+## Development Environment
+
+**Package Manager:** This project uses `uv` for dependency management and virtual environment handling.
+
+**Key Commands:**
+- `uv run python script.py` - Run Python scripts with project dependencies
+- `uv run python -c "code"` - Run inline Python code with dependencies
+- `uv add package` - Add new dependencies
+- `uv sync` - Sync dependencies from pyproject.toml
+- `uv lock` - Update lock file
+
+**Testing:** All Python scripts should be executed using `uv run` to ensure access to the virtual environment and installed dependencies (like the `mcp` package).
+
 ---
 
 ## Phase 1: Project Setup & Foundation
@@ -112,16 +125,16 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Return basic flat list first (before hierarchy logic)
 
 #### Subtask 2.2.2: Implement hierarchy building logic
-- [ ] Create function to build nested project → phase → task → subtask structure
-- [ ] Group items by type and parent_id relationships
-- [ ] Handle orphaned items (items with invalid parent_id)
-- [ ] Ensure consistent ordering within each level
+- [x] Create function to build nested project → phase → task → subtask structure
+- [x] Group items by type and parent_id relationships
+- [x] Handle orphaned items (items with invalid parent_id)
+- [x] Ensure consistent ordering within each level
 
 #### Subtask 2.2.3: Add completion summaries for completed sections
-- [ ] Detect completed phases/tasks that have completed children
-- [ ] Generate summary text ("✓ All tasks completed")
-- [ ] Include completion summaries in hierarchy
-- [ ] Maintain parent visibility even when all children completed
+- [x] Detect completed phases/tasks that have completed children
+- [x] Generate summary text ("✓ All tasks completed")
+- [x] Include completion summaries in hierarchy
+- [x] Maintain parent visibility even when all children completed
 
 #### Subtask 2.2.4: Integrate get_current_work_plan with MCP
 - [ ] Register tool with MCP server
