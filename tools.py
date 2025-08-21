@@ -7,6 +7,7 @@ Each tool follows the MCP protocol for parameter validation and response formatt
 
 from typing import Any, Dict
 import logging
+import json
 from mcp import Tool
 from project_id import get_project_id as _get_project_id
 from database import (
@@ -16,7 +17,8 @@ from database import (
     add_completion_summaries,
     create_work_item as _create_work_item,
     update_work_item as _update_work_item,
-    complete_item as _complete_item
+    complete_item as _complete_item,
+    search_work_items_with_context as _search_work_items_with_context
 )
 
 logger = logging.getLogger(__name__)
@@ -310,6 +312,36 @@ async def complete_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Failed to complete work item: {str(e)}")
 
 
+async def search_items(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Search for work items by query string with full context.
+    
+    Returns matching work items with their parent breadcrumb paths for context.
+    """
+    query = arguments.get("query")
+    project_id = arguments.get("project_id")
+    
+    if not query:
+        raise ValueError("query parameter is required")
+    if not project_id:
+        raise ValueError("project_id parameter is required")
+    
+    try:
+        search_results = _search_work_items_with_context(project_id, query)
+        
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": json.dumps(search_results, indent=2)
+                }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error in search_items tool: {e}")
+        raise ValueError(f"Failed to search work items: {str(e)}")
+
+
 # Tool definitions for MCP server registration
 TOOLS = [
     Tool(
@@ -436,6 +468,24 @@ TOOLS = [
             },
             "required": ["id", "project_id"]
         }
+    ),
+    Tool(
+        name="search_items",
+        description="Search for work items by query string with parent context",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query to match against work item titles and descriptions"
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Project identifier from get_project_id tool"
+                }
+            },
+            "required": ["query", "project_id"]
+        }
     )
 ]
 
@@ -446,7 +496,8 @@ TOOL_HANDLERS = {
     "get_current_work_plan": get_current_work_plan,
     "create_work_item": create_work_item,
     "update_work_item": update_work_item,
-    "complete_item": complete_item
+    "complete_item": complete_item,
+    "search_items": search_items
 }
 
 

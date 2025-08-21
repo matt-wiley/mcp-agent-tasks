@@ -243,10 +243,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Format parent context clearly
 
 #### Subtask 2.6.3: MCP tool integration
-- [ ] Register search_items tool
-- [ ] Define schema with query and project_id parameters
-- [ ] Add input validation (non-empty query)
-- [ ] Format search results consistently
+- [x] Register search_items tool
+- [x] Define schema with query and project_id parameters
+- [x] Add input validation (non-empty query)
+- [x] Format search results consistently
 
 ---
 
