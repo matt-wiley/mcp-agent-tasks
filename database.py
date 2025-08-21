@@ -345,7 +345,7 @@ def add_completion_summaries(hierarchy: Dict[str, Any], all_items: List[Dict[str
 
 def create_work_item(project_id: str, item_type: str, title: str, description: str = None, parent_id: Optional[int] = None, notes: str = None) -> Dict[str, Any]:
     """
-    Create a new work item in the database.
+    Create a new work item in the database with hierarchy validation.
     
     Args:
         project_id: Project identifier
@@ -357,7 +357,13 @@ def create_work_item(project_id: str, item_type: str, title: str, description: s
     
     Returns:
         Dict containing the created work item with generated ID
+        
+    Raises:
+        ValueError: If hierarchy validation fails
     """
+    # Validate hierarchy rules
+    _validate_hierarchy(project_id, item_type, parent_id)
+    
     with get_connection() as conn:
         # Auto-generate order_index: get max sibling order + 10
         if parent_id is None:
@@ -399,6 +405,103 @@ def create_work_item(project_id: str, item_type: str, title: str, description: s
         logger.info(f"Created work item {new_id}: {item_type} '{title}' in project {project_id}")
         
         return created_item
+
+
+def _validate_hierarchy(project_id: str, item_type: str, parent_id: Optional[int]) -> None:
+    """
+    Validate hierarchy rules for work item creation.
+    
+    Args:
+        project_id: Project identifier
+        item_type: Type of item being created
+        parent_id: Parent item ID (None for top-level)
+        
+    Raises:
+        ValueError: If hierarchy validation fails
+    """
+    # Define valid hierarchy rules
+    HIERARCHY_RULES = {
+        'project': [None],  # Projects can only be top-level (no parent)
+        'phase': ['project'],  # Phases can only be under projects
+        'task': ['project', 'phase'],  # Tasks can be under projects or phases
+        'subtask': ['task']  # Subtasks can only be under tasks
+    }
+    
+    if item_type not in HIERARCHY_RULES:
+        raise ValueError(f"Invalid item type: {item_type}. Must be one of: {list(HIERARCHY_RULES.keys())}")
+    
+    # Check if parent_id is None (top-level item)
+    if parent_id is None:
+        if None not in HIERARCHY_RULES[item_type]:
+            raise ValueError(f"{item_type} items cannot be top-level. Valid parents: {HIERARCHY_RULES[item_type]}")
+        return  # No further validation needed for top-level items
+    
+    # Get parent item information
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT id, project_id, type FROM work_items WHERE id = ?",
+            [parent_id]
+        )
+        parent_row = cursor.fetchone()
+        
+        if not parent_row:
+            raise ValueError(f"Parent item with ID {parent_id} does not exist")
+        
+        parent_item = dict(parent_row)
+    
+    # Validate parent belongs to same project
+    if parent_item['project_id'] != project_id:
+        raise ValueError(f"Parent item belongs to different project: {parent_item['project_id']} vs {project_id}")
+    
+    # Validate parent type is allowed for this item type
+    parent_type = parent_item['type']
+    if parent_type not in HIERARCHY_RULES[item_type]:
+        raise ValueError(f"{item_type} items cannot be children of {parent_type}. Valid parents: {HIERARCHY_RULES[item_type]}")
+    
+    # Check for circular references by traversing up the hierarchy
+    _check_circular_reference(parent_id, project_id, max_depth=4)
+
+
+def _check_circular_reference(parent_id: int, project_id: str, max_depth: int = 4) -> None:
+    """
+    Check for circular references and enforce maximum hierarchy depth.
+    
+    Args:
+        parent_id: Starting parent ID
+        project_id: Project identifier for scoping
+        max_depth: Maximum allowed hierarchy depth
+        
+    Raises:
+        ValueError: If circular reference detected or max depth exceeded
+    """
+    visited_ids = set()
+    current_id = parent_id
+    depth = 0
+    
+    with get_connection() as conn:
+        while current_id is not None and depth < max_depth:
+            # Check for circular reference
+            if current_id in visited_ids:
+                raise ValueError(f"Circular reference detected in hierarchy at item {current_id}")
+            
+            visited_ids.add(current_id)
+            depth += 1
+            
+            # Get parent of current item
+            cursor = conn.execute(
+                "SELECT parent_id FROM work_items WHERE id = ? AND project_id = ?",
+                [current_id, project_id]
+            )
+            row = cursor.fetchone()
+            
+            if not row:
+                break  # Item not found or doesn't belong to project
+                
+            current_id = row[0]
+        
+        # Check if we exceeded max depth
+        if depth >= max_depth:
+            raise ValueError(f"Maximum hierarchy depth ({max_depth}) exceeded")
 
 
 if __name__ == "__main__":
@@ -511,5 +614,55 @@ if __name__ == "__main__":
         
     except Exception as e:
         print(f"Error testing create_work_item: {e}")
+    
+    # Test hierarchy validation
+    print("\nTesting hierarchy validation:")
+    try:
+        # Test valid hierarchy: project → phase → task → subtask
+        print("Testing valid hierarchy...")
+        project = create_work_item(test_project_id, "project", "Validation Test Project")
+        phase = create_work_item(test_project_id, "phase", "Test Phase", parent_id=project['id'])
+        task = create_work_item(test_project_id, "task", "Test Task", parent_id=phase['id'])
+        subtask = create_work_item(test_project_id, "subtask", "Test Subtask", parent_id=task['id'])
+        print("✓ Valid hierarchy creation successful")
+        
+        # Test task directly under project (should work)
+        direct_task = create_work_item(test_project_id, "task", "Direct Task", parent_id=project['id'])
+        print("✓ Task under project successful")
+        
+    except Exception as e:
+        print(f"✗ Valid hierarchy test failed: {e}")
+    
+    # Test invalid hierarchy cases
+    invalid_test_cases = [
+        ("phase with no parent", "phase", "Invalid Phase", None),
+        ("task with no parent", "task", "Invalid Task", None), 
+        ("subtask with no parent", "subtask", "Invalid Subtask", None),
+        ("phase under phase", "phase", "Phase under Phase", phase['id']),
+        ("subtask under phase", "subtask", "Subtask under Phase", phase['id']),
+        ("project under project", "project", "Project under Project", project['id']),
+    ]
+    
+    for test_name, item_type, title, parent_id in invalid_test_cases:
+        try:
+            create_work_item(test_project_id, item_type, title, parent_id=parent_id)
+            print(f"✗ {test_name} should have failed but succeeded")
+        except ValueError as e:
+            print(f"✓ {test_name} correctly rejected: {str(e)[:60]}...")
+        except Exception as e:
+            print(f"? {test_name} failed with unexpected error: {e}")
+    
+    # Test cross-project parent validation
+    try:
+        other_project_id = "b3RoZXJfcHJvamVjdA=="  # base64 for "other_project"
+        other_project = create_work_item(other_project_id, "project", "Other Project")
+        
+        # Try to create task under parent from different project
+        create_work_item(test_project_id, "task", "Cross Project Task", parent_id=other_project['id'])
+        print("✗ Cross-project parent should have failed")
+    except ValueError as e:
+        print(f"✓ Cross-project parent correctly rejected: {str(e)[:60]}...")
+    except Exception as e:
+        print(f"? Cross-project test failed unexpectedly: {e}")
     
     print("\nDatabase functions working correctly!")
