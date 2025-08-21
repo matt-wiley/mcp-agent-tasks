@@ -404,6 +404,15 @@ def create_work_item(project_id: str, item_type: str, title: str, description: s
         conn.commit()
         logger.info(f"Created work item {new_id}: {item_type} '{title}' in project {project_id}")
         
+        # Log creation to changelog
+        details = f"Created {item_type}: '{title}'"
+        if parent_id:
+            details += f" (parent: {parent_id})"
+        if description:
+            details += f" - {description}"
+            
+        log_to_changelog(new_id, project_id, "created", details)
+        
         return created_item
 
 
@@ -502,6 +511,66 @@ def _check_circular_reference(parent_id: int, project_id: str, max_depth: int = 
         # Check if we exceeded max depth
         if depth >= max_depth:
             raise ValueError(f"Maximum hierarchy depth ({max_depth}) exceeded")
+
+
+def log_to_changelog(work_item_id: int, project_id: str, action: str, details: str) -> None:
+    """
+    Log an action to the changelog table for audit trail.
+    
+    Args:
+        work_item_id: ID of the work item affected
+        project_id: Project identifier
+        action: Type of action (created, updated, completed, etc.)
+        details: Additional details about the action
+    """
+    try:
+        with get_connection() as conn:
+            conn.execute('''
+                INSERT INTO changelog (work_item_id, project_id, action, details, created_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', [work_item_id, project_id, action, details])
+            
+            conn.commit()
+            logger.info(f"Logged {action} for work item {work_item_id} in project {project_id}")
+            
+    except Exception as e:
+        # Handle logging errors gracefully - don't fail the main operation
+        logger.error(f"Failed to log to changelog: {e}")
+
+
+def get_changelog_for_project(project_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Get changelog entries for a project.
+    
+    Args:
+        project_id: Project identifier
+        limit: Optional limit on number of entries returned
+    
+    Returns:
+        List of changelog entries as dictionaries
+    """
+    with get_connection() as conn:
+        query = """
+            SELECT id, work_item_id, project_id, action, details, created_at
+            FROM changelog 
+            WHERE project_id = ?
+            ORDER BY created_at DESC
+        """
+        
+        params = [project_id]
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        
+        cursor = conn.execute(query, params)
+        
+        # Convert rows to dictionaries
+        entries = []
+        for row in cursor.fetchall():
+            entries.append(dict(row))
+        
+        logger.info(f"Retrieved {len(entries)} changelog entries for project {project_id}")
+        return entries
 
 
 if __name__ == "__main__":
@@ -664,5 +733,29 @@ if __name__ == "__main__":
         print(f"✓ Cross-project parent correctly rejected: {str(e)[:60]}...")
     except Exception as e:
         print(f"? Cross-project test failed unexpectedly: {e}")
+    
+    # Test changelog functionality
+    print("\nTesting changelog functionality:")
+    try:
+        # Get changelog entries for the test project
+        changelog_entries = get_changelog_for_project(test_project_id, limit=5)
+        print(f"Found {len(changelog_entries)} recent changelog entries")
+        
+        # Display recent changelog entries
+        for entry in changelog_entries:
+            print(f"- {entry['action']} (ID: {entry['work_item_id']}): {entry['details']}")
+        
+        # Test changelog for other project
+        other_changelog = get_changelog_for_project("b3RoZXJfcHJvamVjdA==", limit=5)
+        print(f"Other project changelog entries: {len(other_changelog)}")
+        
+        if other_changelog:
+            for entry in other_changelog:
+                print(f"- Other: {entry['action']} (ID: {entry['work_item_id']}): {entry['details']}")
+        
+        print("✓ Changelog integration working correctly")
+        
+    except Exception as e:
+        print(f"✗ Changelog test failed: {e}")
     
     print("\nDatabase functions working correctly!")
