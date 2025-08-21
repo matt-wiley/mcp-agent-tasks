@@ -231,10 +231,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 **Goal:** Allow text search across work items within project scope
 
 #### Subtask 2.6.1: Basic search query
-- [ ] Write SQL query with LIKE '%query%' for title and description
-- [ ] Filter by project_id to maintain project isolation
-- [ ] Return matching items with basic information
-- [ ] Add case-insensitive search
+- [x] Write SQL query with LIKE '%query%' for title and description
+- [x] Filter by project_id to maintain project isolation
+- [x] Return matching items with basic information
+- [x] Add case-insensitive search
 
 #### Subtask 2.6.2: Add parent context to search results
 - [ ] Include parent item information for each search result

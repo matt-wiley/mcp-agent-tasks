@@ -908,6 +908,58 @@ def complete_item(item_id: int, project_id: str) -> Dict[str, Any]:
         return completed_item
 
 
+def search_work_items(project_id: str, query: str) -> List[Dict[str, Any]]:
+    """
+    Search for work items within a project by title and description.
+    
+    Performs case-insensitive text search across title and description fields
+    while maintaining project isolation.
+    
+    Args:
+        project_id: Project identifier to search within
+        query: Search query string to match against title and description
+        
+    Returns:
+        List of matching work items as dictionaries
+        
+    Raises:
+        ValueError: If query is empty or invalid
+    """
+    if not query or not query.strip():
+        raise ValueError("Search query cannot be empty")
+    
+    # Prepare case-insensitive search pattern
+    search_pattern = f"%{query.strip()}%"
+    
+    with get_connection() as conn:
+        # Search in both title and description fields with case-insensitive matching
+        cursor = conn.execute('''
+            SELECT * FROM work_items 
+            WHERE project_id = ? 
+            AND (
+                title LIKE ? COLLATE NOCASE 
+                OR description LIKE ? COLLATE NOCASE
+            )
+            ORDER BY 
+                type ASC,
+                CASE 
+                    WHEN type = 'project' THEN 0
+                    WHEN type = 'phase' THEN 1
+                    WHEN type = 'task' THEN 2
+                    WHEN type = 'subtask' THEN 3
+                    ELSE 4
+                END,
+                order_index ASC,
+                title ASC
+        ''', [project_id, search_pattern, search_pattern])
+        
+        items = [dict(row) for row in cursor.fetchall()]
+        
+        logger.info(f"Search for '{query}' in project {project_id}: found {len(items)} items")
+        
+        return items
+
+
 def get_changelog_for_project(project_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Get changelog entries for a project.
