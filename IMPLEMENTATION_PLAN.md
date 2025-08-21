@@ -106,10 +106,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 **Goal:** Implement the rolling work plan that hides completed items
 
 #### Subtask 2.2.1: Basic work plan query
-- [ ] Write SQL query to get all work items for a project_id
-- [ ] Filter to show only incomplete items (not_started, in_progress)
-- [ ] Order items by hierarchy and order_index
-- [ ] Return basic flat list first (before hierarchy logic)
+- [x] Write SQL query to get all work items for a project_id
+- [x] Filter to show only incomplete items (not_started, in_progress)
+- [x] Order items by hierarchy and order_index
+- [x] Return basic flat list first (before hierarchy logic)
 
 #### Subtask 2.2.2: Implement hierarchy building logic
 - [ ] Create function to build nested project → phase → task → subtask structure
