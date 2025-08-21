@@ -483,10 +483,23 @@ def update_work_item(item_id: int, project_id: str, **updates) -> Dict[str, Any]
         if 'project_id' in updates:
             raise ValueError("Cannot change project_id - this would break project isolation")
         
+        # Validate status transitions are logical
+        if 'status' in updates:
+            _validate_status_transition(existing_item['status'], updates['status'])
+        
         # If updating parent_id or type, validate hierarchy rules
         new_type = updates.get('type', existing_item['type'])
         new_parent_id = updates.get('parent_id', existing_item['parent_id'])
         
+        # Validate type changes don't break hierarchy rules
+        if 'type' in updates:
+            _validate_type_change(item_id, existing_item['type'], new_type, project_id)
+        
+        # Ensure parent_id changes maintain valid hierarchy
+        if 'parent_id' in updates:
+            _validate_parent_change(item_id, existing_item['parent_id'], new_parent_id, new_type, project_id)
+        
+        # If updating both parent_id and type, validate the combination
         if 'type' in updates or 'parent_id' in updates:
             _validate_hierarchy(project_id, new_type, new_parent_id)
         
@@ -629,6 +642,185 @@ def _check_circular_reference(parent_id: int, project_id: str, max_depth: int = 
         # Check if we exceeded max depth
         if depth >= max_depth:
             raise ValueError(f"Maximum hierarchy depth ({max_depth}) exceeded")
+
+
+def _validate_status_transition(current_status: str, new_status: str) -> None:
+    """
+    Validate that status transitions are logical.
+    
+    Args:
+        current_status: Current status of the work item
+        new_status: Proposed new status
+        
+    Raises:
+        ValueError: If status transition is not logical
+    """
+    # Define valid status transition rules
+    VALID_TRANSITIONS = {
+        'not_started': ['in_progress', 'completed'],  # Can skip to completed
+        'in_progress': ['not_started', 'completed'],  # Can go back or forward
+        'completed': ['in_progress']  # Can only go back to in_progress
+    }
+    
+    # Allow staying in same status (no-op)
+    if current_status == new_status:
+        return
+    
+    valid_next_statuses = VALID_TRANSITIONS.get(current_status, [])
+    if new_status not in valid_next_statuses:
+        raise ValueError(f"Invalid status transition from '{current_status}' to '{new_status}'. "
+                        f"Valid transitions: {valid_next_statuses}")
+
+
+def _validate_type_change(item_id: int, current_type: str, new_type: str, project_id: str) -> None:
+    """
+    Validate that type changes don't break hierarchy rules by checking children.
+    
+    Args:
+        item_id: ID of the item being changed
+        current_type: Current type of the item
+        new_type: Proposed new type
+        project_id: Project identifier
+        
+    Raises:
+        ValueError: If type change would break hierarchy rules
+    """
+    # Allow same type (no-op)
+    if current_type == new_type:
+        return
+    
+    # Define what children each type can have
+    ALLOWED_CHILDREN = {
+        'project': ['phase', 'task'],
+        'phase': ['task', 'subtask'],
+        'task': ['subtask'],
+        'subtask': []
+    }
+    
+    # Get all children of this item
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT type FROM work_items WHERE parent_id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        child_types = [row[0] for row in cursor.fetchall()]
+    
+    # If no children, type change is safe
+    if not child_types:
+        return
+    
+    # Check if new type can have all existing children
+    allowed_children_for_new_type = ALLOWED_CHILDREN.get(new_type, [])
+    
+    for child_type in child_types:
+        if child_type not in allowed_children_for_new_type:
+            raise ValueError(f"Cannot change type from '{current_type}' to '{new_type}': "
+                           f"would create invalid hierarchy with {child_type} children. "
+                           f"'{new_type}' can only have children of types: {allowed_children_for_new_type}")
+
+
+def _validate_parent_change(item_id: int, current_parent_id: Optional[int], new_parent_id: Optional[int], 
+                          item_type: str, project_id: str) -> None:
+    """
+    Validate that parent_id changes maintain valid hierarchy and don't create circular references.
+    
+    Args:
+        item_id: ID of the item being changed
+        current_parent_id: Current parent ID (None for top-level)
+        new_parent_id: Proposed new parent ID (None for top-level)
+        item_type: Type of the item being moved
+        project_id: Project identifier
+        
+    Raises:
+        ValueError: If parent change would create invalid hierarchy or circular reference
+    """
+    # Allow same parent (no-op)
+    if current_parent_id == new_parent_id:
+        return
+    
+    # If setting to None (making top-level), just validate type allows it
+    if new_parent_id is None:
+        if item_type not in ['project']:
+            raise ValueError(f"Cannot make {item_type} top-level. Only projects can be top-level.")
+        return
+    
+    # Check that new parent exists and belongs to same project
+    with get_connection() as conn:
+        cursor = conn.execute(
+            "SELECT type FROM work_items WHERE id = ? AND project_id = ?",
+            [new_parent_id, project_id]
+        )
+        parent_row = cursor.fetchone()
+        
+        if not parent_row:
+            raise ValueError(f"New parent item {new_parent_id} not found in project {project_id}")
+        
+        new_parent_type = parent_row[0]
+    
+    # Validate hierarchy rules for the new parent-child relationship
+    HIERARCHY_RULES = {
+        'project': [None],
+        'phase': ['project'],
+        'task': ['project', 'phase'],
+        'subtask': ['task']
+    }
+    
+    allowed_parents = HIERARCHY_RULES.get(item_type, [])
+    if new_parent_type not in allowed_parents:
+        raise ValueError(f"Cannot move {item_type} under {new_parent_type}. "
+                        f"Valid parents for {item_type}: {allowed_parents}")
+    
+    # Check for circular reference: ensure we're not trying to move an item under one of its descendants
+    _validate_not_descendant(item_id, new_parent_id, project_id)
+
+
+def _validate_not_descendant(item_id: int, potential_parent_id: int, project_id: str) -> None:
+    """
+    Ensure we're not creating a circular reference by making an item a child of its descendant.
+    
+    Args:
+        item_id: ID of the item being moved
+        potential_parent_id: ID of the proposed new parent
+        project_id: Project identifier
+        
+    Raises:
+        ValueError: If potential_parent_id is a descendant of item_id
+    """
+    # Get all descendants of the item being moved
+    descendants = _get_all_descendants(item_id, project_id)
+    
+    if potential_parent_id in descendants:
+        raise ValueError(f"Cannot move item {item_id} under item {potential_parent_id}: "
+                        f"would create circular reference (target is a descendant)")
+
+
+def _get_all_descendants(item_id: int, project_id: str) -> set:
+    """
+    Get all descendant IDs of a given item.
+    
+    Args:
+        item_id: ID of the parent item
+        project_id: Project identifier
+        
+    Returns:
+        Set of all descendant item IDs
+    """
+    descendants = set()
+    
+    with get_connection() as conn:
+        # Get direct children
+        cursor = conn.execute(
+            "SELECT id FROM work_items WHERE parent_id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        direct_children = [row[0] for row in cursor.fetchall()]
+    
+    # Add direct children and recursively get their descendants
+    for child_id in direct_children:
+        descendants.add(child_id)
+        descendants.update(_get_all_descendants(child_id, project_id))
+    
+    return descendants
 
 
 def log_to_changelog(work_item_id: int, project_id: str, action: str, details: str) -> None:

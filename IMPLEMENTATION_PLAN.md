@@ -179,10 +179,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Return updated item with all current values
 
 #### Subtask 2.4.2: Update validation logic
-- [ ] Prevent changing project_id (maintain project isolation)
-- [ ] Validate status transitions are logical
-- [ ] Validate type changes don't break hierarchy rules
-- [ ] Ensure parent_id changes maintain valid hierarchy
+- [x] Prevent changing project_id (maintain project isolation)
+- [x] Validate status transitions are logical
+- [x] Validate type changes don't break hierarchy rules
+- [x] Ensure parent_id changes maintain valid hierarchy
 
 #### Subtask 2.4.3: Changelog for updates
 - [ ] Log each field change to changelog
