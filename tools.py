@@ -15,7 +15,8 @@ from database import (
     build_hierarchy,
     add_completion_summaries,
     create_work_item as _create_work_item,
-    update_work_item as _update_work_item
+    update_work_item as _update_work_item,
+    complete_item as _complete_item
 )
 
 logger = logging.getLogger(__name__)
@@ -256,6 +257,59 @@ async def update_work_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Failed to update work item: {str(e)}")
 
 
+async def complete_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    MCP tool: Mark a work item as completed
+    
+    Args:
+        arguments: Dictionary containing:
+            - id (int): ID of the work item to complete
+            - project_id (str): Project identifier for validation
+    
+    Returns:
+        Dict containing completion confirmation and updated item data
+    
+    Raises:
+        ValueError: If required fields are missing or item doesn't exist
+    """
+    try:
+        # Extract and validate required parameters
+        item_id = arguments.get("id")
+        if item_id is None:  # Allow id=0
+            raise ValueError("id parameter is required")
+        
+        project_id = arguments.get("project_id")
+        if not project_id:
+            raise ValueError("project_id parameter is required")
+        
+        # Complete the work item (includes validation and changelog logging)
+        completed_item = _complete_item(item_id, project_id)
+        
+        logger.info(f"Completed work item via MCP: {completed_item['id']} - {completed_item['title']}")
+        
+        # Format response according to MCP specification
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Work item completed successfully!\n\n"
+                           f"ID: {completed_item['id']}\n"
+                           f"Title: {completed_item['title']}\n"
+                           f"Type: {completed_item['type']}\n"
+                           f"Status: {completed_item['status']}\n"
+                           f"Completed: {completed_item['updated_at']}\n"
+                           f"Project: {completed_item['project_id']}"
+                           + (f"\nParent ID: {completed_item['parent_id']}" if completed_item['parent_id'] else "")
+                }
+            ],
+            "data": completed_item
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in complete_item tool: {e}")
+        raise ValueError(f"Failed to complete work item: {str(e)}")
+
+
 # Tool definitions for MCP server registration
 TOOLS = [
     Tool(
@@ -364,6 +418,24 @@ TOOLS = [
             },
             "required": ["id", "project_id"]
         }
+    ),
+    Tool(
+        name="complete_item",
+        description="Mark a work item as completed with automatic timestamp",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer",
+                    "description": "ID of the work item to complete"
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "Project identifier from get_project_id tool"
+                }
+            },
+            "required": ["id", "project_id"]
+        }
     )
 ]
 
@@ -373,7 +445,8 @@ TOOL_HANDLERS = {
     "get_project_id": get_project_id,
     "get_current_work_plan": get_current_work_plan,
     "create_work_item": create_work_item,
-    "update_work_item": update_work_item
+    "update_work_item": update_work_item,
+    "complete_item": complete_item
 }
 
 

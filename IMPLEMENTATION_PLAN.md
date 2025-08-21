@@ -222,10 +222,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Handle logging errors
 
 #### Subtask 2.5.3: MCP tool integration
-- [ ] Register complete_item tool with server
-- [ ] Define schema with id parameter
-- [ ] Add validation for item existence
-- [ ] Return completion confirmation
+- [x] Register complete_item tool with server
+- [x] Define schema with id parameter
+- [x] Add validation for item existence
+- [x] Return completion confirmation
 
 ### Task 2.6: Search Tool Implementation
 **Goal:** Allow text search across work items within project scope
