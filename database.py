@@ -160,6 +160,189 @@ def get_all_work_items_for_project(project_id: str) -> List[Dict[str, Any]]:
         return items
 
 
+def build_hierarchy(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Build nested hierarchy structure from flat list of work items.
+    
+    Args:
+        items: Flat list of work items with parent_id relationships
+    
+    Returns:
+        Dict with nested structure: projects -> phases -> tasks -> subtasks
+        Also includes orphaned items that don't fit the hierarchy
+    """
+    # Organize items by parent_id
+    by_parent = {}  # parent_id -> [children]
+    
+    for item in items:
+        parent_id = item['parent_id']
+        if parent_id not in by_parent:
+            by_parent[parent_id] = []
+        by_parent[parent_id].append(item)
+    
+    # Build hierarchy starting from projects (no parent)
+    hierarchy = {
+        'projects': [],
+        'orphaned_items': []
+    }
+    
+    # Track all processed item IDs
+    processed_ids = set()
+    
+    # Start with projects (parent_id is None)
+    root_items = by_parent.get(None, [])
+    projects = [item for item in root_items if item['type'] == 'project']
+    
+    for project in projects:
+        project_dict = dict(project)  # Copy the project data
+        project_dict['phases'] = []
+        project_dict['direct_tasks'] = []  # Tasks directly under project
+        processed_ids.add(project['id'])
+        
+        # Get children of this project
+        project_children = by_parent.get(project['id'], [])
+        
+        # Separate phases and direct tasks
+        phases = [item for item in project_children if item['type'] == 'phase']
+        direct_tasks = [item for item in project_children if item['type'] == 'task']
+        
+        # Process phases
+        for phase in phases:
+            phase_dict = dict(phase)
+            phase_dict['tasks'] = []
+            processed_ids.add(phase['id'])
+            
+            # Get tasks under this phase
+            phase_children = by_parent.get(phase['id'], [])
+            tasks = [item for item in phase_children if item['type'] == 'task']
+            
+            # Process tasks under phase
+            for task in tasks:
+                task_dict = dict(task)
+                task_dict['subtasks'] = []
+                processed_ids.add(task['id'])
+                
+                # Get subtasks under this task
+                task_children = by_parent.get(task['id'], [])
+                subtasks = [item for item in task_children if item['type'] == 'subtask']
+                
+                # Process subtasks
+                for subtask in subtasks:
+                    processed_ids.add(subtask['id'])
+                
+                task_dict['subtasks'] = subtasks
+                phase_dict['tasks'].append(task_dict)
+            
+            project_dict['phases'].append(phase_dict)
+        
+        # Process direct tasks (tasks directly under project)
+        for task in direct_tasks:
+            task_dict = dict(task)
+            task_dict['subtasks'] = []
+            processed_ids.add(task['id'])
+            
+            # Get subtasks under this task
+            task_children = by_parent.get(task['id'], [])
+            subtasks = [item for item in task_children if item['type'] == 'subtask']
+            
+            # Process subtasks
+            for subtask in subtasks:
+                processed_ids.add(subtask['id'])
+            
+            task_dict['subtasks'] = subtasks
+            project_dict['direct_tasks'].append(task_dict)
+        
+        hierarchy['projects'].append(project_dict)
+    
+    # Find orphaned items (items not processed in the hierarchy)
+    for item in items:
+        if item['id'] not in processed_ids:
+            hierarchy['orphaned_items'].append(dict(item))
+    
+    logger.info(f"Built hierarchy: {len(hierarchy['projects'])} projects, {len(hierarchy['orphaned_items'])} orphaned items")
+    return hierarchy
+
+
+def add_completion_summaries(hierarchy: Dict[str, Any], all_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Add completion summaries for sections where all children are completed.
+    
+    Args:
+        hierarchy: Hierarchy structure from build_hierarchy()
+        all_items: All work items for the project (including completed ones)
+    
+    Returns:
+        Modified hierarchy with completion summaries added
+    """
+    # Create lookup for all items by ID
+    items_by_id = {item['id']: item for item in all_items}
+    
+    def check_all_children_completed(parent_id: int, item_type: str) -> bool:
+        """Check if all children of a parent are completed"""
+        children = [item for item in all_items 
+                   if item.get('parent_id') == parent_id]
+        
+        if not children:
+            return False
+            
+        return all(child['status'] == 'completed' for child in children)
+    
+    def count_completed_children(parent_id: int) -> tuple:
+        """Count completed vs total children"""
+        children = [item for item in all_items 
+                   if item.get('parent_id') == parent_id]
+        
+        if not children:
+            return 0, 0
+            
+        completed = sum(1 for child in children if child['status'] == 'completed')
+        return completed, len(children)
+    
+    # Process each project in the hierarchy
+    for project in hierarchy['projects']:
+        project_id = project['id']
+        
+        # Check phases for completion summaries
+        for phase in project['phases']:
+            phase_id = phase['id']
+            completed_tasks, total_tasks = count_completed_children(phase_id)
+            
+            if completed_tasks > 0 and completed_tasks == total_tasks:
+                # All tasks in this phase are completed
+                phase['completion_summary'] = f"✓ All {total_tasks} tasks completed"
+            elif completed_tasks > 0:
+                # Some tasks completed
+                phase['completion_summary'] = f"✓ {completed_tasks}/{total_tasks} tasks completed"
+        
+        # Check direct tasks for subtask completion
+        for task in project['direct_tasks']:
+            task_id = task['id']
+            completed_subtasks, total_subtasks = count_completed_children(task_id)
+            
+            if completed_subtasks > 0 and completed_subtasks == total_subtasks:
+                # All subtasks completed
+                task['completion_summary'] = f"✓ All {total_subtasks} subtasks completed"
+            elif completed_subtasks > 0:
+                # Some subtasks completed
+                task['completion_summary'] = f"✓ {completed_subtasks}/{total_subtasks} subtasks completed"
+        
+        # Check tasks within phases for subtask completion
+        for phase in project['phases']:
+            for task in phase['tasks']:
+                task_id = task['id']
+                completed_subtasks, total_subtasks = count_completed_children(task_id)
+                
+                if completed_subtasks > 0 and completed_subtasks == total_subtasks:
+                    # All subtasks completed
+                    task['completion_summary'] = f"✓ All {total_subtasks} subtasks completed"
+                elif completed_subtasks > 0:
+                    # Some subtasks completed
+                    task['completion_summary'] = f"✓ {completed_subtasks}/{total_subtasks} subtasks completed"
+    
+    logger.info("Added completion summaries to hierarchy")
+    return hierarchy
+
+
 if __name__ == "__main__":
     # Test database initialization and queries when run directly
     logging.basicConfig(level=logging.INFO)
@@ -182,4 +365,46 @@ if __name__ == "__main__":
     completed_items = get_work_items_for_project(test_project_id, ['completed'])
     print(f"Completed items found: {len(completed_items)}")
     
-    print("\nDatabase query functions working correctly!")
+    # Test hierarchy building with empty data
+    print("\nTesting hierarchy building:")
+    hierarchy = build_hierarchy([])
+    print(f"Empty hierarchy: {hierarchy}")
+    
+    # Test hierarchy building with sample data
+    sample_items = [
+        {'id': 1, 'type': 'project', 'title': 'Test Project', 'parent_id': None, 'status': 'in_progress'},
+        {'id': 2, 'type': 'phase', 'title': 'Phase 1', 'parent_id': 1, 'status': 'in_progress'},
+        {'id': 3, 'type': 'task', 'title': 'Task 1', 'parent_id': 2, 'status': 'completed'},
+        {'id': 4, 'type': 'subtask', 'title': 'Subtask 1', 'parent_id': 3, 'status': 'completed'},
+        {'id': 5, 'type': 'subtask', 'title': 'Subtask 2', 'parent_id': 3, 'status': 'completed'},
+        {'id': 6, 'type': 'task', 'title': 'Direct Task', 'parent_id': 1, 'status': 'in_progress'},
+        {'id': 7, 'type': 'subtask', 'title': 'Direct Subtask 1', 'parent_id': 6, 'status': 'completed'},
+        {'id': 8, 'type': 'subtask', 'title': 'Direct Subtask 2', 'parent_id': 6, 'status': 'not_started'},
+        {'id': 9, 'type': 'task', 'title': 'Orphaned Task', 'parent_id': 999, 'status': 'not_started'}
+    ]
+    
+    hierarchy = build_hierarchy(sample_items)
+    print(f"Sample hierarchy projects count: {len(hierarchy['projects'])}")
+    print(f"Sample hierarchy orphaned count: {len(hierarchy['orphaned_items'])}")
+    
+    # Test completion summaries
+    print("\nTesting completion summaries:")
+    hierarchy_with_summaries = add_completion_summaries(hierarchy, sample_items)
+    
+    if hierarchy_with_summaries['projects']:
+        project = hierarchy_with_summaries['projects'][0]
+        print(f"Project title: {project['title']}")
+        print(f"Phases count: {len(project['phases'])}")
+        print(f"Direct tasks count: {len(project['direct_tasks'])}")
+        
+        # Check phase completion summaries
+        for phase in project['phases']:
+            summary = phase.get('completion_summary', 'No completion summary')
+            print(f"Phase '{phase['title']}': {summary}")
+        
+        # Check direct task completion summaries
+        for task in project['direct_tasks']:
+            summary = task.get('completion_summary', 'No completion summary')
+            print(f"Direct Task '{task['title']}': {summary}")
+    
+    print("\nDatabase functions working correctly!")
