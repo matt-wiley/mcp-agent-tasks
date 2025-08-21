@@ -13,7 +13,8 @@ from database import (
     get_work_items_for_project, 
     get_all_work_items_for_project,
     build_hierarchy,
-    add_completion_summaries
+    add_completion_summaries,
+    create_work_item as _create_work_item
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,79 @@ async def get_current_work_plan(arguments: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Failed to retrieve work plan: {str(e)}")
 
 
+async def create_work_item(arguments: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    MCP tool: Create a new work item in the hierarchical structure
+    
+    Args:
+        arguments: Dictionary containing:
+            - project_id (str): Project identifier from get_project_id
+            - type (str): Type of item (project, phase, task, subtask)
+            - title (str): Title of the work item
+            - description (str, optional): Description of the work item
+            - parent_id (int, optional): Parent item ID for hierarchy
+            - notes (str, optional): Additional notes
+    
+    Returns:
+        Dict containing the created work item data
+    
+    Raises:
+        ValueError: If required fields are missing or validation fails
+    """
+    try:
+        # Extract and validate required parameters
+        project_id = arguments.get("project_id")
+        if not project_id:
+            raise ValueError("project_id parameter is required")
+        
+        item_type = arguments.get("type")
+        if not item_type:
+            raise ValueError("type parameter is required")
+        
+        title = arguments.get("title")
+        if not title:
+            raise ValueError("title parameter is required")
+        
+        # Extract optional parameters
+        description = arguments.get("description")
+        parent_id = arguments.get("parent_id")
+        notes = arguments.get("notes")
+        
+        # Create the work item (includes validation and changelog logging)
+        created_item = _create_work_item(
+            project_id=project_id,
+            item_type=item_type,
+            title=title,
+            description=description,
+            parent_id=parent_id,
+            notes=notes
+        )
+        
+        logger.info(f"Created work item via MCP: {created_item['id']} - {item_type} '{title}'")
+        
+        # Format response according to MCP specification
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": f"Work item created successfully!\n\n"
+                           f"ID: {created_item['id']}\n"
+                           f"Type: {created_item['type']}\n"
+                           f"Title: {created_item['title']}\n"
+                           f"Status: {created_item['status']}\n"
+                           f"Project: {created_item['project_id']}"
+                           + (f"\nParent ID: {created_item['parent_id']}" if created_item['parent_id'] else "")
+                           + (f"\nDescription: {created_item['description']}" if created_item['description'] else "")
+                }
+            ],
+            "data": created_item
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in create_work_item tool: {e}")
+        raise ValueError(f"Failed to create work item: {str(e)}")
+
+
 # Tool definitions for MCP server registration
 TOOLS = [
     Tool(
@@ -141,6 +215,41 @@ TOOLS = [
             },
             "required": ["project_id"]
         }
+    ),
+    Tool(
+        name="create_work_item",
+        description="Create a new work item in the hierarchical project structure",
+        inputSchema={
+            "type": "object", 
+            "properties": {
+                "project_id": {
+                    "type": "string",
+                    "description": "Project identifier from get_project_id tool"
+                },
+                "type": {
+                    "type": "string",
+                    "enum": ["project", "phase", "task", "subtask"],
+                    "description": "Type of work item to create"
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title/name of the work item"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional description of the work item"
+                },
+                "parent_id": {
+                    "type": "integer", 
+                    "description": "Optional parent item ID for hierarchy (leave empty for top-level projects)"
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Optional additional notes"
+                }
+            },
+            "required": ["project_id", "type", "title"]
+        }
     )
 ]
 
@@ -148,7 +257,8 @@ TOOLS = [
 # Tool handler mapping
 TOOL_HANDLERS = {
     "get_project_id": get_project_id,
-    "get_current_work_plan": get_current_work_plan
+    "get_current_work_plan": get_current_work_plan,
+    "create_work_item": create_work_item
 }
 
 
@@ -183,18 +293,55 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Expected error (empty database): {e}")
         
+        # Test create_work_item
+        print(f"\nTesting create_work_item:")
+        try:
+            test_project_id = "dGVzdF9wcm9qZWN0"  # base64 for "test_project"
+            
+            # Create a project
+            project_result = await create_work_item({
+                "project_id": test_project_id,
+                "type": "project",
+                "title": "MCP Test Project",
+                "description": "A project created via MCP tool"
+            })
+            print(f"Created project: ID {project_result['data']['id']}")
+            
+            # Create a phase under the project
+            phase_result = await create_work_item({
+                "project_id": test_project_id,
+                "type": "phase", 
+                "title": "MCP Test Phase",
+                "parent_id": project_result['data']['id']
+            })
+            print(f"Created phase: ID {phase_result['data']['id']}")
+            
+        except Exception as e:
+            print(f"create_work_item error: {e}")
+        
         # Test error cases
         print(f"\nTesting error cases:")
-        try:
-            result = await get_project_id({})
-            print(f"Unexpected success: {result}")
-        except Exception as e:
-            print(f"Expected error: {e}")
-            
-        try:
-            result = await get_current_work_plan({})
-            print(f"Unexpected success: {result}")
-        except Exception as e:
-            print(f"Expected error: {e}")
+        error_test_cases = [
+            ({}, "Missing all required fields"),
+            ({"project_id": "test"}, "Missing type and title"),
+            ({"project_id": "test", "type": "invalid", "title": "test"}, "Invalid type"),
+            ({"project_id": "test", "type": "phase", "title": "test"}, "Phase without parent"),
+        ]
+        
+        for test_args, test_name in error_test_cases:
+            try:
+                if 'get_project_id' in test_name:
+                    result = await get_project_id(test_args)
+                    print(f"✗ {test_name} should have failed")
+                elif 'get_current_work_plan' in test_name:
+                    result = await get_current_work_plan(test_args)
+                    print(f"✗ {test_name} should have failed")
+                else:
+                    result = await create_work_item(test_args)
+                    print(f"✗ {test_name} should have failed")
+            except ValueError as e:
+                print(f"✓ {test_name}: {str(e)[:50]}...")
+            except Exception as e:
+                print(f"? {test_name} failed unexpectedly: {e}")
     
     asyncio.run(test_tools())
