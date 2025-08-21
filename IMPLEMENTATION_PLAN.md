@@ -4,6 +4,27 @@
 **Repository:** https://github.com/matt-wiley/mcp-agent-tasks  
 **Goal:** Build a minimal MCP server for AI agents to manage tasks without burning context tokens
 
+## Ways of Working
+
+### Development Workflow
+We follow a structured subtask-by-subtask approach to ensure quality and maintainability:
+
+1. **Make the changes** - Implement the specific subtask requirements
+2. **Verify the work** - Test imports, run basic validation, check functionality
+3. **Update docs as needed** - Update implementation plan progress, add notes
+4. **Wait for review** - Present work for human review and feedback
+5. **Once approved → commit changes** - Create meaningful commit with clear message
+6. **Wait for approval** - Get explicit go-ahead before moving to next subtask
+
+### Principles
+- **One subtask at a time** - Complete each subtask fully before moving on
+- **Verify everything** - Every change must be tested/validated before review
+- **Clear documentation** - Update progress and document decisions as we go
+- **Meaningful commits** - Each commit represents a complete, working subtask
+- **Human oversight** - No automatic progression, human approval required at each step
+
+---
+
 ## Project Overview
 
 This implementation plan breaks down the POC requirements into a hierarchical task structure. The goal is to prove three key concepts:
@@ -34,9 +55,9 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 **Goal:** Create the SQLite database structure for task management
 
 #### Subtask 1.2.1: Create database.py module
-- [ ] Create `database.py` file in project root
-- [ ] Import required SQLite and datetime modules
-- [ ] Define database file path constant (`./tasks.db`)
+- [x] Create `database.py` file in project root
+- [x] Import required SQLite and datetime modules
+- [x] Define database file path constant (`./tasks.db`)
 
 #### Subtask 1.2.2: Implement work_items table creation
 - [ ] Write SQL schema for work_items table with all specified columns
