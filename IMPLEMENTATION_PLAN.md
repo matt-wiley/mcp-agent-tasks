@@ -195,10 +195,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 - [x] Ensure parent_id changes maintain valid hierarchy
 
 #### Subtask 2.4.3: Changelog for updates
-- [ ] Log each field change to changelog
-- [ ] Include old and new values in details
-- [ ] Track which fields were modified
-- [ ] Handle multiple field updates in single operation
+- [x] Log each field change to changelog
+- [x] Include old and new values in details
+- [x] Track which fields were modified
+- [x] Handle multiple field updates in single operation
 
 #### Subtask 2.4.4: MCP tool integration
 - [x] Register update_work_item tool
