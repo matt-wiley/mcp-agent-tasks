@@ -416,6 +416,124 @@ def create_work_item(project_id: str, item_type: str, title: str, description: s
         return created_item
 
 
+def update_work_item(item_id: int, project_id: str, **updates) -> Dict[str, Any]:
+    """
+    Update a work item with flexible field updates.
+    
+    Args:
+        item_id: ID of the work item to update
+        project_id: Project identifier for validation
+        **updates: Keyword arguments for fields to update
+        
+    Returns:
+        Dictionary containing the updated work item
+        
+    Raises:
+        ValueError: If item doesn't exist, belongs to wrong project, or invalid field updates
+    """
+    if not updates:
+        raise ValueError("No updates provided")
+    
+    # Define valid updateable fields and their types
+    VALID_FIELDS = {
+        'title': str,
+        'description': str,
+        'status': str,
+        'type': str,
+        'parent_id': (int, type(None)),
+        'order_index': (int, float),
+    }
+    
+    # Define status constraints
+    VALID_STATUSES = ['not_started', 'in_progress', 'completed']
+    
+    # Define type constraints  
+    VALID_TYPES = ['project', 'phase', 'task', 'subtask']
+    
+    # Validate all provided fields
+    for field, value in updates.items():
+        if field not in VALID_FIELDS:
+            raise ValueError(f"Invalid field '{field}'. Valid fields: {list(VALID_FIELDS.keys())}")
+        
+        expected_type = VALID_FIELDS[field]
+        if not isinstance(value, expected_type):
+            raise ValueError(f"Field '{field}' must be of type {expected_type}, got {type(value)}")
+        
+        # Additional validation for specific fields
+        if field == 'status' and value not in VALID_STATUSES:
+            raise ValueError(f"Invalid status '{value}'. Must be one of: {VALID_STATUSES}")
+        
+        if field == 'type' and value not in VALID_TYPES:
+            raise ValueError(f"Invalid type '{value}'. Must be one of: {VALID_TYPES}")
+    
+    with get_connection() as conn:
+        # First, verify the item exists and belongs to the project
+        cursor = conn.execute(
+            "SELECT * FROM work_items WHERE id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        existing_item_row = cursor.fetchone()
+        
+        if not existing_item_row:
+            raise ValueError(f"Work item {item_id} not found in project {project_id}")
+        
+        existing_item = dict(existing_item_row)
+        
+        # Prevent changing project_id to maintain project isolation
+        if 'project_id' in updates:
+            raise ValueError("Cannot change project_id - this would break project isolation")
+        
+        # If updating parent_id or type, validate hierarchy rules
+        new_type = updates.get('type', existing_item['type'])
+        new_parent_id = updates.get('parent_id', existing_item['parent_id'])
+        
+        if 'type' in updates or 'parent_id' in updates:
+            _validate_hierarchy(project_id, new_type, new_parent_id)
+        
+        # Build the UPDATE SQL dynamically
+        set_clauses = []
+        params = []
+        
+        for field, value in updates.items():
+            set_clauses.append(f"{field} = ?")
+            params.append(value)
+        
+        # Always update the updated_at timestamp
+        set_clauses.append("updated_at = CURRENT_TIMESTAMP")
+        
+        # Add the WHERE clause parameters
+        params.extend([item_id, project_id])
+        
+        # Execute the update
+        update_sql = f"""
+            UPDATE work_items 
+            SET {', '.join(set_clauses)}
+            WHERE id = ? AND project_id = ?
+        """
+        
+        conn.execute(update_sql, params)
+        
+        # Get the updated item
+        cursor = conn.execute(
+            "SELECT * FROM work_items WHERE id = ? AND project_id = ?",
+            [item_id, project_id]
+        )
+        updated_item = dict(cursor.fetchone())
+        
+        conn.commit()
+        logger.info(f"Updated work item {item_id} in project {project_id}: {list(updates.keys())}")
+        
+        # Log the update to changelog
+        details = f"Updated fields: {', '.join(updates.keys())}"
+        for field, value in updates.items():
+            old_value = existing_item.get(field)
+            details += f"\n  {field}: '{old_value}' → '{value}'"
+        
+        log_to_changelog(item_id, project_id, "updated", details)
+        
+        return updated_item
+
+
 def _validate_hierarchy(project_id: str, item_type: str, parent_id: Optional[int]) -> None:
     """
     Validate hierarchy rules for work item creation.

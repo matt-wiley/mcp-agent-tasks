@@ -173,10 +173,10 @@ This implementation plan breaks down the POC requirements into a hierarchical ta
 **Goal:** Allow modification of existing work items
 
 #### Subtask 2.4.1: Generic update mechanism
-- [ ] Write flexible SQL UPDATE that accepts any field updates
-- [ ] Update updated_at timestamp automatically
-- [ ] Validate updated fields against table schema
-- [ ] Return updated item with all current values
+- [x] Write flexible SQL UPDATE that accepts any field updates
+- [x] Update updated_at timestamp automatically
+- [x] Validate updated fields against table schema
+- [x] Return updated item with all current values
 
 #### Subtask 2.4.2: Update validation logic
 - [ ] Prevent changing project_id (maintain project isolation)
